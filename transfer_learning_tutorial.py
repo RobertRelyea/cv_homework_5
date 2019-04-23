@@ -78,17 +78,23 @@ data_transforms = {
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
+    ]),
+    'val': transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ]),
 }
 
-data_dir = 'data/PetImages'
-image_datasets = {x: datasets.ImageFolder(data_dir,
+data_dir = '/home/imhs/Robert/computer_vision_2019/homework5/data/new'
+image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x),
                                           data_transforms[x])
-                  for x in ['train']}
-dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=4,
-                                             shuffle=True, num_workers=4)
-              for x in ['train']}
-dataset_sizes = {x: len(image_datasets[x]) for x in ['train']}
+                  for x in ['train', 'val']}
+dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=64,
+                                             shuffle=True, num_workers=16)
+              for x in ['train', 'val']}
+dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val']}
 class_names = image_datasets['train'].classes
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -141,6 +147,8 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
 
+    stats = []
+
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
@@ -185,6 +193,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
 
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(
                 phase, epoch_loss, epoch_acc))
+            stats.append([phase, epoch, epoch_loss, epoch_acc])
 
             # deep copy the model
             if phase == 'val' and epoch_acc > best_acc:
@@ -200,7 +209,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
 
     # load best model weights
     model.load_state_dict(best_model_wts)
-    return model
+    return model, stats
 
 
 ######################################################################
@@ -243,35 +252,35 @@ def visualize_model(model, num_images=6):
 # Load a pretrained model and reset final fully connected layer.
 #
 
-model_ft = models.resnet18(pretrained=True)
-num_ftrs = model_ft.fc.in_features
-model_ft.fc = nn.Linear(num_ftrs, 2)
+# model_ft = models.resnet18(pretrained=True)
+# num_ftrs = model_ft.fc.in_features
+# model_ft.fc = nn.Linear(num_ftrs, 2)
 
-model_ft = model_ft.to(device)
+# model_ft = model_ft.to(device)
 
-criterion = nn.CrossEntropyLoss()
+# criterion = nn.CrossEntropyLoss()
 
-# Observe that all parameters are being optimized
-optimizer_ft = optim.SGD(model_ft.parameters(), lr=0.001, momentum=0.9)
+# # Observe that all parameters are being optimized
+# optimizer_ft = optim.SGD(model_ft.parameters(), lr=0.001, momentum=0.9)
 
-# Decay LR by a factor of 0.1 every 7 epochs
-exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.1)
+# # Decay LR by a factor of 0.1 every 7 epochs
+# exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.1)
 
-######################################################################
-# Train and evaluate
-# ^^^^^^^^^^^^^^^^^^
-#
-# It should take around 15-25 min on CPU. On GPU though, it takes less than a
-# minute.
-#
+# ######################################################################
+# # Train and evaluate
+# # ^^^^^^^^^^^^^^^^^^
+# #
+# # It should take around 15-25 min on CPU. On GPU though, it takes less than a
+# # minute.
+# #
 
-model_ft = train_model(model_ft, criterion, optimizer_ft, exp_lr_scheduler,
-                       num_epochs=60)
+# model_ft = train_model(model_ft, criterion, optimizer_ft, exp_lr_scheduler,
+#                        num_epochs=25)
 
-######################################################################
-#
+# ######################################################################
+# #
 
-visualize_model(model_ft)
+# visualize_model(model_ft)
 
 
 ######################################################################
@@ -287,12 +296,27 @@ visualize_model(model_ft)
 #
 
 model_conv = torchvision.models.resnet18(pretrained=True)
-for param in model_conv.parameters():
-    param.requires_grad = False
+
+# Freeze weights up to this layer (9 for FC fine tuning)
+freeze_index = 0
+
+
+# Iterate through all children in the model
+count = 0
+for child in model_conv.children():
+    # Freeze weights below the freeze index
+    if count < freeze_index:
+        for param in child.parameters():
+            param.requires_grad = False
+    count+=1
+
+
 
 # Parameters of newly constructed modules have requires_grad=True by default
 num_ftrs = model_conv.fc.in_features
 model_conv.fc = nn.Linear(num_ftrs, 2)
+
+print("Using device: {}".format(device))
 
 model_conv = model_conv.to(device)
 
@@ -314,14 +338,67 @@ exp_lr_scheduler = lr_scheduler.StepLR(optimizer_conv, step_size=7, gamma=0.1)
 # This is expected as gradients don't need to be computed for most of the
 # network. However, forward does need to be computed.
 #
-
-model_conv = train_model(model_conv, criterion, optimizer_conv,
-                         exp_lr_scheduler, num_epochs=25)
+num_epochs = 60
+model_conv, stats = train_model(model_conv, criterion, optimizer_conv,
+                         exp_lr_scheduler, num_epochs=num_epochs)
 
 ######################################################################
 #
+
+path = './models/resnet_{}_{}.pt'.format(freeze_index, num_epochs)
+
+torch.save({
+    'epoch': num_epochs,
+    'model_state_dict': model_conv.state_dict(),
+    'optimizer_state_dict': optimizer_conv.state_dict(),
+    'loss': stats[-1:1]
+},  path)
+
 
 visualize_model(model_conv)
 
 plt.ioff()
 plt.show()
+
+stats = np.array(stats)
+
+stats_train = stats[stats[:,0]=='train']
+epochs = stats_train[:,1]
+losses_train = stats_train[:,2]
+accs_train = [acc.item() for acc in stats_train[:,3]]
+
+stats_val = stats[stats[:,0]=='val']
+losses_val = stats_val[:,2]
+accs_val = [acc.item() for acc in stats_val[:,3]]
+
+train_line, = plt.plot(epochs, losses_train)
+val_line, = plt.plot(epochs, losses_val)
+plt.legend([train_line, val_line], ["Training Loss", "Validation Loss"])
+plt.title("Loss statistics for {} Epoch{}".format(num_epochs, 's' if (num_epochs != 1) else ''))
+plt.xlabel("Iteration")
+plt.ylabel("Batch Loss")
+plt.savefig("./figures/resnet_{}_loss.png".format(freeze_index))
+plt.show()
+
+train_line, = plt.plot(epochs, accs_train)
+val_line, = plt.plot(epochs, accs_val)
+plt.legend([train_line, val_line], ["Training Accuracy", "Validation Accuracy"])
+plt.title("Accuracy statistics for {} Epoch{}".format(num_epochs, 's' if (num_epochs != 1) else ''))
+plt.xlabel("Iteration")
+plt.ylabel("Batch Accuracy")
+plt.savefig("./figures/resnet_{}_acc.png".format(freeze_index))
+plt.show()
+
+print("Generating confusion matrix...")
+
+confusion_matrix = torch.zeros(2, 2)
+with torch.no_grad():
+    for i, (inputs, classes) in enumerate(dataloaders['val']):
+        inputs = inputs.to(device)
+        classes = classes.to(device)
+        outputs = model_conv(inputs)
+        _, preds = torch.max(outputs, 1)
+        for classs, pred in zip(classes.view(-1), preds.view(-1)):
+                confusion_matrix[classs.long(), pred.long()] += 1
+
+print(confusion_matrix)

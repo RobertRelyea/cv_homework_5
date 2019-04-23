@@ -1,0 +1,5 @@
+Best val Acc: 0.984400
+Generating confusion matrix...
+tensor([[1228.,   22.],
+        [  17., 1233.]])
+tensor([0.9824, 0.9864])

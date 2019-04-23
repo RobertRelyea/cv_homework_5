@@ -1,0 +1,6 @@
+Training complete in 39m 34s
+Best val Acc: 0.984000
+Generating confusion matrix...
+tensor([[1231.,   19.],
+        [  21., 1229.]])
+tensor([0.9848, 0.9832])
